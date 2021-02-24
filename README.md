@@ -41,7 +41,7 @@ Look for your Govee_HS074_XXXX
 Or (simpler?):
 
 ```shell
-hcitool -i hci0 lescan --duplicates --passive | grep -i Govee
+sudo hcitool -i hci0 lescan --duplicates --passive
 ```
 
 ### Alternative
