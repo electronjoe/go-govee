@@ -44,7 +44,7 @@ func onStateChanged(d gatt.Device, s gatt.State) {
 	switch s {
 	case gatt.StatePoweredOn:
 		glog.Info("scanning...")
-		d.Scan([]gatt.UUID{}, false)
+		d.Scan([]gatt.UUID{}, true)
 		return
 	default:
 		d.StopScanning()
@@ -59,7 +59,7 @@ func onPeriphDiscovered(devices devicesConfig) func(p gatt.Peripheral, a *gatt.A
 	return func(p gatt.Peripheral, a *gatt.Advertisement, rssi int) {
 		if _, ok := devices.IdToNames[p.ID()]; !ok {
 			btRx.WithLabelValues("not-in-devices-yml").Inc()
-			glog.Infof("Device ID %q not listed in devices.yml, skipping!", p.ID())
+			glog.V(4).Infof("Device ID %q not listed in devices.yml, skipping!", p.ID())
 			return
 		}
 
@@ -67,7 +67,7 @@ func onPeriphDiscovered(devices devicesConfig) func(p gatt.Peripheral, a *gatt.A
 
 		wantLen := 9
 		if len(a.ManufacturerData) != wantLen {
-			glog.Infof("Govee ManufacturerData len %d, want %d, skipping!", len(a.ManufacturerData), wantLen)
+			glog.V(4).Infof("Govee ManufacturerData len %d, want %d, skipping!", len(a.ManufacturerData), wantLen)
 
 			govRx.WithLabelValues(p.ID(), "rejected-invalid-length").Inc()
 			return
@@ -83,7 +83,7 @@ func onPeriphDiscovered(devices devicesConfig) func(p gatt.Peripheral, a *gatt.A
 		hum.WithLabelValues(p.ID()).Set(float64(h))
 		bat.WithLabelValues(p.ID()).Set(float64(b))
 
-		glog.Infof("Received Govee Advertisement with temp=%f hum=%f bat=%d at rssi=%d",
+		glog.V(3).Infof("Received Govee Advertisement with temp=%f hum=%f bat=%d at rssi=%d",
 			t,
 			h,
 			b,
