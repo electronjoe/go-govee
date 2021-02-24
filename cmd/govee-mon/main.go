@@ -79,9 +79,10 @@ func onPeriphDiscovered(devices devicesConfig) func(p gatt.Peripheral, a *gatt.A
 		h := float32(binary.LittleEndian.Uint16(a.ManufacturerData[5:7])) / 100.0
 		b := a.ManufacturerData[7]
 
-		temp.WithLabelValues(p.ID()).Set(float64(t))
-		hum.WithLabelValues(p.ID()).Set(float64(h))
-		bat.WithLabelValues(p.ID()).Set(float64(b))
+		name := devices.IdToNames[p.ID()]
+		temp.WithLabelValues(name).Set(float64(t))
+		hum.WithLabelValues(name).Set(float64(h))
+		bat.WithLabelValues(name).Set(float64(b))
 
 		glog.V(3).Infof("Received Govee Advertisement with temp=%f hum=%f bat=%d at rssi=%d",
 			t,
