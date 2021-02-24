@@ -5,11 +5,38 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
+	"net/http"
 
 	"github.com/bettercap/gatt"
 	"github.com/bettercap/gatt/examples/option"
 	"github.com/golang/glog"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"gopkg.in/yaml.v3"
+)
+
+var (
+	btRx = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "bluetooth_advertisement_rx",
+		Help: "The total number of bluetooth advertisement receptions",
+	}, []string{"type"})
+	govRx = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "govee_rx",
+		Help: "The total number of bluetooth advertisement from Govee devices",
+	}, []string{"id", "processed"})
+	temp = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "temperature",
+		Help: "The most recent temperature reported (deg fahrenheit) by name (mapped from ID)",
+	}, []string{"name"})
+	hum = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "humidity",
+		Help: "The most recent humidity reported (deg fahrenheit) by name (mapped from ID)",
+	}, []string{"name"})
+	bat = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "battery",
+		Help: "The most recent battery level reported (0-100) in percent by name (mapped from ID)",
+	}, []string{"name"})
 )
 
 func onStateChanged(d gatt.Device, s gatt.State) {
@@ -24,27 +51,43 @@ func onStateChanged(d gatt.Device, s gatt.State) {
 	}
 }
 
+func c_to_f(celcius float32) float32 {
+	return (celcius * (9.0 / 5.0)) + 32.0
+}
+
 func onPeriphDiscovered(devices devicesConfig) func(p gatt.Peripheral, a *gatt.Advertisement, rssi int) {
 	return func(p gatt.Peripheral, a *gatt.Advertisement, rssi int) {
 		if _, ok := devices.IdToNames[p.ID()]; !ok {
+			btRx.WithLabelValues("not-in-devices-yml").Inc()
 			glog.Infof("Device ID %q not listed in devices.yml, skipping!", p.ID())
 			return
 		}
 
+		btRx.WithLabelValues("in-devices-yml").Inc()
+
 		wantLen := 9
 		if len(a.ManufacturerData) != wantLen {
+			btRx.WithLabelValues("govee-data-missized").Inc()
 			glog.Infof("Govee ManufacturerData len %d, want %d, skipping!", len(a.ManufacturerData), wantLen)
+
+			govRx.WithLabelValues(p.ID(), "rejected-invalid-length").Inc()
 			return
 		}
 
-		temp := float32(binary.LittleEndian.Uint16(a.ManufacturerData[3:5])) / 100.0
-		humidity := float32(binary.LittleEndian.Uint16(a.ManufacturerData[5:7])) / 100.0
-		bat := a.ManufacturerData[7]
+		govRx.WithLabelValues(p.ID(), "processed").Inc()
+
+		t := c_to_f(float32(binary.LittleEndian.Uint16(a.ManufacturerData[3:5])) / 100.0)
+		h := float32(binary.LittleEndian.Uint16(a.ManufacturerData[5:7])) / 100.0
+		b := a.ManufacturerData[7]
+
+		temp.WithLabelValues(p.ID()).Set(float64(t))
+		hum.WithLabelValues(p.ID()).Set(float64(h))
+		bat.WithLabelValues(p.ID()).Set(float64(b))
 
 		glog.Infof("Received Govee Advertisement with temp=%f hum=%f bat=%d at rssi=%d",
-			temp,
-			humidity,
-			bat,
+			t,
+			h,
+			b,
 			rssi,
 		)
 	}
@@ -85,5 +128,9 @@ func main() {
 	// Register handlers.
 	d.Handle(gatt.PeripheralDiscovered(onPeriphDiscovered(devices)))
 	d.Init(onStateChanged)
+
+	http.Handle("/metrics", promhttp.Handler())
+	http.ListenAndServe(":2112", nil)
+
 	select {}
 }
