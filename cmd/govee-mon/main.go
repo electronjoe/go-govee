@@ -67,7 +67,6 @@ func onPeriphDiscovered(devices devicesConfig) func(p gatt.Peripheral, a *gatt.A
 
 		wantLen := 9
 		if len(a.ManufacturerData) != wantLen {
-			btRx.WithLabelValues("govee-data-missized").Inc()
 			glog.Infof("Govee ManufacturerData len %d, want %d, skipping!", len(a.ManufacturerData), wantLen)
 
 			govRx.WithLabelValues(p.ID(), "rejected-invalid-length").Inc()

@@ -56,6 +56,23 @@ With stderr-based logging at info and higher
 sudo go run cmd/govee-mon/main.go --logtostderr
 ```
 
+### Fetching prometheus data by hand
+
+```shell
+curl http://localhost:2112/metrics
+```
+
+### Configuring Prometheus (prometheus.yml)
+
+```shell
+scrape_configs:
+- job_name: myapp
+  scrape_interval: 10s
+  static_configs:
+  - targets:
+    - localhost:2112
+```
+
 ## Issues
 
 ### Govee Overheard but not Temp Advertisements
