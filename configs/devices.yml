@@ -1,0 +1,4 @@
+# For YAML Formatting see https://docs.ansible.com/ansible/latest/reference_appendices/YAMLSyntax.html
+---
+IdToNames:
+  "E3:60:58:E1:90:E3": "Office Bedroom"
