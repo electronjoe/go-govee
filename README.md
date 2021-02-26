@@ -10,6 +10,8 @@ Playing with Golang parsing of Govee temperature hydrometers
 
 I liked [This](https://github.com/golang-standards/project-layout) project layout advice, and am leveraging it.
 
+TODO: Review vs [This](https://github.com/golang-standards/project-layout)
+
 ## Enable BT
 
 For Ubuntu 20.04 Rpi 3 [This](https://raspberrypi.stackexchange.com/questions/114586/rpi-4b-bluetooth-unavailable-on-ubuntu-20-04) worked for me:
