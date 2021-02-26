@@ -37,6 +37,10 @@ var (
 		Name: "battery",
 		Help: "The most recent battery level reported (0-100) in percent by name (mapped from ID)",
 	}, []string{"name"})
+	rssiTelem = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "rssi",
+		Help: "The most recent Receive Signal Level (RSSI) reported by name (mapped from ID)",
+	}, []string{"name"})
 )
 
 func onStateChanged(d gatt.Device, s gatt.State) {
@@ -83,6 +87,7 @@ func onPeriphDiscovered(devices devicesConfig) func(p gatt.Peripheral, a *gatt.A
 		temp.WithLabelValues(name).Set(float64(t))
 		hum.WithLabelValues(name).Set(float64(h))
 		bat.WithLabelValues(name).Set(float64(b))
+		rssiTelem.WithLabelValues(name).Set(float64(rssi))
 
 		glog.V(3).Infof("Received Govee Advertisement with temp=%f hum=%f bat=%d at rssi=%d",
 			t,
