@@ -43,6 +43,16 @@ var (
 	}, []string{"name"})
 )
 
+func parse_temp_c(manufacturer_data []byte) float32 {
+	twos_complement := binary.LittleEndian.Uint16(manufacturer_data)
+	var converted int16 = int16(twos_complement) // If positive value
+	if (twos_complement & 0x80) != 0 {
+		// Convert to negative representation
+		converted = int16(twos_complement^0xFF) + 1
+	}
+	return float32(converted) / 100.0
+}
+
 func onStateChanged(d gatt.Device, s gatt.State) {
 	glog.Info("State:", s)
 	switch s {
@@ -86,7 +96,7 @@ func onPeriphDiscovered(devices devicesConfig) func(p gatt.Peripheral, a *gatt.A
 
 		govRx.WithLabelValues(p.ID(), "processed").Inc()
 
-		t := c_to_f(float32(binary.LittleEndian.Uint16(a.ManufacturerData[3:5])) / 100.0)
+		t := c_to_f(parse_temp_c(a.ManufacturerData[3:5]))
 		h := float32(binary.LittleEndian.Uint16(a.ManufacturerData[5:7])) / 100.0
 		b := a.ManufacturerData[7]
 
