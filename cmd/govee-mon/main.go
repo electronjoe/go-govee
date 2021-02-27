@@ -81,9 +81,16 @@ func onPeriphDiscovered(devices devicesConfig) func(p gatt.Peripheral, a *gatt.A
 
 		wantLen := 9
 		if len(a.ManufacturerData) != wantLen {
-			glog.V(4).Infof("Govee ManufacturerData len %d, want %d, skipping!", len(a.ManufacturerData), wantLen)
-
+			glog.V(4).Infof("Advertisement ManufacturerData len %d, want %d - will not process", len(a.ManufacturerData), wantLen)
 			govRx.WithLabelValues(p.ID(), "rejected-invalid-length").Inc()
+			return
+		}
+
+		var wantGoveeGh5074Flag gatt.Flags = 6
+		// I am noting that this flag value is missing in OSX use of bettercap
+		if a.Flags != wantGoveeGh5074Flag {
+			glog.V(4).Infof("Advertisement flag value %d, want %d - will not process", a.Flags, wantGoveeGh5074Flag)
+			govRx.WithLabelValues(p.ID(), "rejected-invalid-type").Inc()
 			return
 		}
 
