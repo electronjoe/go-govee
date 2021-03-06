@@ -1,10 +1,16 @@
 # For YAML Formatting see https://docs.ansible.com/ansible/latest/reference_appendices/YAMLSyntax.html
 ---
-IdToNames:
+IDToNames:
   "E3:60:58:E1:90:E3": "Office Bedroom"
   "E3:60:59:21:24:B7": "Kai Bedroom"
   "E3:60:59:20:E4:B6": "LauraScott Bedroom"
   "E3:60:59:21:CC:FC": "TV Room"
   "E3:60:59:10:8C:7C": "Kitchen Freezer"
-  "E3:60:58:E0:D8:92": "Bread Monitor"
+  "E3:60:58:E0:D8:92": "Seedlings"
   "E3:60:58:E0:58:9D": "Front Of House"
+TemperatureObjectives:
+  - TemperatureObjective:
+    TempSensorName: "Seedlings"
+    OutletName:     "Garden"
+    HeatOnBelowF:   83.0
+    HeatOffAboveF:  86.0

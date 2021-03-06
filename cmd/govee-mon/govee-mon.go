@@ -6,10 +6,14 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"time"
 
 	"github.com/bettercap/gatt"
 	"github.com/bettercap/gatt/examples/option"
+	"github.com/electronjoe/go-govee/pkg/govee"
 	"github.com/golang/glog"
+	"github.com/jaedle/golang-tplink-hs100/pkg/configuration"
+	"github.com/jaedle/golang-tplink-hs100/pkg/hs100"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -41,17 +45,11 @@ var (
 		Name: "rssi",
 		Help: "The most recent Receive Signal Level (RSSI) reported by name (mapped from ID)",
 	}, []string{"name"})
+	outletState = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "outlet_state",
+		Help: "The state of the specified outlet (0 = off, 1 = on) by OutletName",
+	}, []string{"name"})
 )
-
-func parse_temp_c(manufacturer_data []byte) float32 {
-	twos_complement := binary.LittleEndian.Uint16(manufacturer_data)
-	var converted int16 = int16(twos_complement) // If positive value
-	if (twos_complement & 0x80) != 0 {
-		// Convert to negative representation
-		converted = int16(twos_complement^0xFF) + 1
-	}
-	return float32(converted) / 100.0
-}
 
 func onStateChanged(d gatt.Device, s gatt.State) {
 	glog.Info("State:", s)
@@ -65,13 +63,9 @@ func onStateChanged(d gatt.Device, s gatt.State) {
 	}
 }
 
-func c_to_f(celcius float32) float32 {
-	return (celcius * (9.0 / 5.0)) + 32.0
-}
-
-func onPeriphDiscovered(devices devicesConfig) func(p gatt.Peripheral, a *gatt.Advertisement, rssi int) {
+func onPeriphDiscovered(config devicesConfig, outletMap map[string]*hs100.Hs100) func(p gatt.Peripheral, a *gatt.Advertisement, rssi int) {
 	return func(p gatt.Peripheral, a *gatt.Advertisement, rssi int) {
-		if _, ok := devices.IdToNames[p.ID()]; !ok {
+		if _, ok := config.IDToNames[p.ID()]; !ok {
 			btRx.WithLabelValues("not-in-devices-yml").Inc()
 			glog.V(4).Infof("Device ID %q not listed in devices.yml, skipping!", p.ID())
 			return
@@ -79,28 +73,19 @@ func onPeriphDiscovered(devices devicesConfig) func(p gatt.Peripheral, a *gatt.A
 
 		btRx.WithLabelValues("in-devices-yml").Inc()
 
-		wantLen := 9
-		if len(a.ManufacturerData) != wantLen {
-			glog.V(4).Infof("Advertisement ManufacturerData len %d, want %d - will not process", len(a.ManufacturerData), wantLen)
-			govRx.WithLabelValues(p.ID(), "rejected-invalid-length").Inc()
-			return
-		}
-
-		var wantGoveeGh5074Flag gatt.Flags = 6
-		// I am noting that this flag value is missing in OSX use of bettercap
-		if a.Flags != wantGoveeGh5074Flag {
-			glog.V(4).Infof("Advertisement flag value %d, want %d - will not process", a.Flags, wantGoveeGh5074Flag)
-			govRx.WithLabelValues(p.ID(), "rejected-invalid-type").Inc()
+		if !govee.IsGoveeH5074Advertisement(len(a.ManufacturerData), a.Flags, p.ID()) {
+			glog.V(4).Infof("Overheard advertisement with len %d, type %d and deemed it not a Govee H5074 device, ignoring", len(a.ManufacturerData), a.Flags)
+			govRx.WithLabelValues(p.ID(), "rejected-invalid-len-or-type")
 			return
 		}
 
 		govRx.WithLabelValues(p.ID(), "processed").Inc()
 
-		t := c_to_f(parse_temp_c(a.ManufacturerData[3:5]))
+		t := govee.CToF(govee.ParseTempC(a.ManufacturerData[3:5]))
 		h := float32(binary.LittleEndian.Uint16(a.ManufacturerData[5:7])) / 100.0
 		b := a.ManufacturerData[7]
 
-		name := devices.IdToNames[p.ID()]
+		name := config.IDToNames[p.ID()]
 		temp.WithLabelValues(name).Set(float64(t))
 		hum.WithLabelValues(name).Set(float64(h))
 		bat.WithLabelValues(name).Set(float64(b))
@@ -112,11 +97,48 @@ func onPeriphDiscovered(devices devicesConfig) func(p gatt.Peripheral, a *gatt.A
 			b,
 			rssi,
 		)
+
+		for _, obj := range config.TemperatureObjectives {
+			if obj.TempSensorName == name {
+				outlet, ok := outletMap[obj.OutletName]
+				if !ok {
+					glog.Errorf("Configuration error, %v cites undiscovered outlet with OutletName %q", obj, obj.OutletName)
+					return
+				}
+
+				// TODO: Cache this state?
+				isOn, err := outlet.IsOn()
+				if err != nil {
+					glog.Errorf("Failure to call IsOn for outlet %q, err %s", obj.OutletName, err)
+					return
+				}
+
+				if isOn {
+					outletState.WithLabelValues(obj.OutletName).Set(1.0)
+				} else {
+					outletState.WithLabelValues(obj.OutletName).Set(0.0)
+				}
+
+				if isOn && (t > obj.HeatOffAboveF) {
+					outlet.TurnOff()
+				} else if !isOn && (t < obj.HeatOnBelowF) {
+					outlet.TurnOn()
+				}
+			}
+		}
 	}
 }
 
+type temperatureObjective struct {
+	TempSensorName string  `yaml:"TempSensorName"`
+	OutletName     string  `yaml:"OutletName"`
+	HeatOnBelowF   float32 `yaml:"HeatOnBelowF"`
+	HeatOffAboveF  float32 `yaml:"HeatOffAboveF"`
+}
+
 type devicesConfig struct {
-	IdToNames map[string]string `yaml:"IdToNames"`
+	IDToNames             map[string]string      `yaml:"IDToNames"`
+	TemperatureObjectives []temperatureObjective `yaml:"TemperatureObjectives"`
 }
 
 func (c *devicesConfig) Parse(data []byte) error {
@@ -134,13 +156,34 @@ func main() {
 	if err != nil {
 		glog.Fatal(err)
 	}
-	var devices devicesConfig
-	if err := devices.Parse(data); err != nil {
+	var config devicesConfig
+	if err := config.Parse(data); err != nil {
 		glog.Fatal(err)
 	}
-	fmt.Printf("%+v\n", devices)
+	fmt.Printf("%+v\n", config)
 
-	fmt.Print("Success")
+	fmt.Println("Success")
+
+	fmt.Println("Discovering Smart Outlets")
+
+	outlets, err := hs100.Discover("192.168.10.0/24",
+		configuration.Default().WithTimeout(time.Second),
+	)
+	if err != nil {
+		glog.Fatalf("Failed in hs100.Discover, err: %s\n", err)
+	}
+
+	outletMap := make(map[string]*hs100.Hs100)
+	for _, d := range outlets {
+		name, _ := d.GetName()
+		outletMap[name] = d
+		fmt.Println("Discovered HS100 outlet with name: %s", name)
+	}
+
+	// TODO - validate that TemperatureObjectives' TempSensorName and OutletName all exist
+	// if !validateConfig(config) {
+	// 	glog.Fatalf("Inconsitent configuration file or missing Outlet in discovery, contains TempSensorName not in IDToNames or unknown OutletName")
+	// }
 
 	d, err := gatt.NewDevice(option.DefaultClientOptions...)
 	if err != nil {
@@ -148,7 +191,7 @@ func main() {
 	}
 
 	// Register handlers.
-	d.Handle(gatt.PeripheralDiscovered(onPeriphDiscovered(devices)))
+	d.Handle(gatt.PeripheralDiscovered(onPeriphDiscovered(config, outletMap)))
 	d.Init(onStateChanged)
 
 	http.Handle("/metrics", promhttp.Handler())
